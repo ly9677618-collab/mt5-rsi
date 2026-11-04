@@ -96,7 +96,7 @@ def get_json(url, tries=3):
 
 def quote(tv_symbol, field):
     url = (f"https://scanner.tradingview.com/symbol?symbol={urllib.parse.quote(tv_symbol)}"
-           f"&fields=close,change,{urllib.parse.quote(field)},RSI%7C60,RSI%7C240")
+           f"&fields=close,change,{urllib.parse.quote(field)},RSI%7C60,RSI%7C240,ATR%7C15")
     d = get_json(url)
     return {
         "close": d.get("close"),
@@ -104,6 +104,7 @@ def quote(tv_symbol, field):
         "rsi": d.get(field),
         "rsi60": d.get("RSI|60"),
         "rsi240": d.get("RSI|240"),
+        "atr": d.get("ATR|15"),
     }
 
 
@@ -276,48 +277,58 @@ def build_message(cfg, rows, now, new_hits=None):
     else:
         us_txt = f"💵 الدولار: <b>ثابت ➖</b> ({us:+.2f}%)\n"
 
+    f1 = float(cfg.get("filter_1h", 45))
+    tp_mult = float(cfg.get("tp_mult", 1.75))
+    signals = [r for r in new_hits if (r.get("rsi60") or 0) >= f1]
+    rejected = [r for r in new_hits if (r.get("rsi60") or 0) < f1]
+
     head = (
-        f"📉 <b>RSI ≤ {thr:g} — فريم {tf} دقيقة</b>\n"
-        f"🕐 <b>{fmt12(now)}</b> بغداد · شمعة <code>{fmt12(candle_open)}–{fmt12(candle_close)}</code>\n"
-        f"{us_txt}"
-        f"🆕 نزلوا الحد هسه: <b>{len(new_hits)}</b>"
-        f" (من أصل {len(rows)} زوج)\n\n"
+        f"🔔 <b>إشارة RSI — فريم {tf} دقيقة</b>\n"
+        f"🕐 <b>{fmt12(now)}</b> · شمعة <code>{fmt12(candle_open)}–{fmt12(candle_close)}</code>\n"
+        f"{us_txt}\n"
     )
 
-    header = f"{'#':>3}  {'PAIR':<8} {'M15':>5} {'1H':>5} {'4H':>5} {'PRICE':>10}"
-    lines = [header, "─" * len(header)]
-    for i, r in enumerate(new_hits, 1):
-        r60, r240 = r.get("rsi60"), r.get("rsi240")
-        lines.append(
-            f"{i:>3}  {r['name']:<8} {r['rsi']:>5.1f} "
-            f"{(f'{r60:.1f}' if r60 is not None else '-'):>5} "
-            f"{(f'{r240:.1f}' if r240 is not None else '-'):>5} "
-            f"{fmt_price(r['close']):>10}"
-        )
+    if not signals:
+        body = "🚫 <b>ماكو إشارة مؤكدة هذي الشمعة</b>\n"
+        if rejected:
+            body += "\n<i>رفضها فلتر الاتجاه (1H أقل من " + f"{f1:g}" + "):</i>\n"
+            body += "\n".join(
+                f"• {r['name']} — M15 {r['rsi']:.1f} · 1H {(r.get('rsi60') or 0):.1f}"
+                for r in rejected)
+        return head + body + news_block(news, news_ok) + "\n\n<i>TradingView</i>"
 
-    body = "<pre>" + "\n".join(lines) + "</pre>\n"
-
-    expl = []
-    for r in new_hits:
-        icon, why = verdict(r)
+    cards = []
+    for r in signals:
+        atr = r.get("atr")
+        price = r["close"]
+        card = [f"🟢 <b>{r['name']}</b> · RSI <b>{r['rsi']:.1f}</b>"]
+        if atr and price:
+            sl = price - atr
+            tp = price + atr * tp_mult
+            card.append(f"   السعر <code>{fmt_price(price)}</code>")
+            card.append(f"   🛑 <code>{fmt_price(sl)}</code> · 🎯 <code>{fmt_price(tp)}</code>")
+        else:
+            card.append(f"   السعر <code>{fmt_price(price)}</code>")
         r60, r240 = r.get("rsi60"), r.get("rsi240")
-        detail = (f"M15 {r['rsi']:.1f}"
-                  + (f" · 1H {r60:.1f}" if r60 is not None else "")
-                  + (f" · 4H {r240:.1f}" if r240 is not None else ""))
-        line = f"\n{icon} <b>{r['name']}</b> — {why}\n   <i>{detail}</i>"
+        line = "   📊 1H"
+        line += f" {r60:.1f}" if r60 is not None else " -"
+        line += f" · 4H {r240:.1f}" if r240 is not None else " · 4H -"
+        card.append(line)
         nf = news_for(r["name"])
         if nf:
-            line += "\n   🔴 خبر: " + " · ".join(
-                f"{n['cur']} {fmt12(n['time'])} {html.escape(n['title'])}" for n in nf[:2])
-        expl.append(line)
+            card.append("   🔴 " + " · ".join(
+                f"{n['cur']} {fmt12(n['time'])}" for n in nf[:2]))
+        cards.append("\n".join(card))
 
-    more = ""
-    if len(hits) > len(new_hits):
-        more = ("\n\n📋 <i>أزواج باقية تحت " + f"{thr:g}" + " (ما تغيرت): "
-                + " · ".join(r["name"] for r in hits if r not in new_hits) + "</i>")
+    body = "\n\n".join(cards)
 
-    return (head + body + "".join(expl) + more
-            + news_block(news, news_ok) + "\n\n<i>TradingView · RSI-14</i>")
+    foot = ""
+    if rejected:
+        foot = "\n\n🚫 <i>رفضها الفلتر: " + " · ".join(
+            f"{r['name']} (1H {(r.get('rsi60') or 0):.1f})" for r in rejected) + "</i>"
+
+    return (head + body + foot + news_block(news, news_ok)
+            + "\n\n<i>وقف 1×ATR · هدف " + f"{tp_mult:g}" + "×ATR</i>")
 
 
 def news_block(news, ok=True):
@@ -428,24 +439,35 @@ def main():
         try:
             rows = scan(cfg)
             thr = float(cfg["threshold"])
-            hits = [r for r in rows if r["rsi"] <= thr]
+            f1 = float(cfg.get("filter_1h", 45))
 
             st = load_state()
-            new_hits = [r for r in hits if not st.get(r["name"], {}).get("below")]
             now_s = dt.datetime.now(TZ).isoformat(timespec="seconds")
+            cands = []
             for r in rows:
+                key = r["name"]
                 below = r["rsi"] <= thr
-                st[r["name"]] = {"below": below, "rsi": round(r["rsi"], 1), "at": now_s}
+                cur = st.get(key, {})
+                if not below:
+                    st[key] = {"below": False, "alerted": False, "rsi": round(r["rsi"], 1)}
+                    continue
+                already = cur.get("alerted", False)
+                if (r.get("rsi60") or 0) >= f1 and not already:
+                    cands.append(r)
+                    st[key] = {"below": True, "alerted": True, "rsi": round(r["rsi"], 1),
+                               "at": now_s}
+                else:
+                    st[key] = {"below": True, "alerted": already,
+                               "rsi": round(r["rsi"], 1)}
             save_state(st)
 
-            if new_hits:
-                msg = build_message(cfg, rows, dt.datetime.now(TZ), new_hits)
+            if cands:
+                msg = build_message(cfg, rows, dt.datetime.now(TZ), cands)
                 send(cfg, msg)
-                print(f"sent at {dt.datetime.now(TZ):%H:%M:%S} new={len(new_hits)} "
-                      f"[{', '.join(r['name'] for r in new_hits)}]", flush=True)
+                print(f"sent at {dt.datetime.now(TZ):%H:%M:%S} "
+                      f"[{', '.join(r['name'] for r in cands)}]", flush=True)
             else:
-                print(f"no new entries at {dt.datetime.now(TZ):%H:%M:%S} "
-                      f"(hits={len(hits)})", flush=True)
+                print(f"no signal at {dt.datetime.now(TZ):%H:%M:%S}", flush=True)
         except Exception as e:  # noqa: BLE001
             print("cycle error:", repr(e), flush=True)
 
