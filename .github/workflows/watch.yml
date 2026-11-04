@@ -1,0 +1,31 @@
+name: RSI Watch
+
+on:
+  workflow_dispatch:
+    inputs:
+      duration:
+        description: "مدة التشغيل بالثواني"
+        required: false
+        default: "19800"
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Watch (15m RSI)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python watch.py --duration ${{ github.event.inputs.duration || '19800' }}
