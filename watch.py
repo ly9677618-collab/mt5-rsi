@@ -37,6 +37,7 @@ DEFAULT_CFG = {
     "timeframe": 15,
     "rsi_field": "RSI|15",
     "duration": 19800,
+    "send_when_empty": False,
     "symbols": {
         "BCHUSD": "BINANCE:BCHUSDT",
         "XAUUSD": "OANDA:XAUUSD",
@@ -258,10 +259,15 @@ def main():
             break
         try:
             rows = scan(cfg)
-            msg = build_message(cfg, rows, dt.datetime.now(TZ))
-            send(cfg, msg)
-            print(f"sent at {dt.datetime.now(TZ):%H:%M:%S} hits="
-                  f"{sum(1 for r in rows if r['rsi'] <= float(cfg['threshold']))}", flush=True)
+            thr = float(cfg["threshold"])
+            hits = [r for r in rows if r["rsi"] <= thr]
+            if hits or cfg.get("send_when_empty"):
+                msg = build_message(cfg, rows, dt.datetime.now(TZ))
+                send(cfg, msg)
+                print(f"sent at {dt.datetime.now(TZ):%H:%M:%S} hits={len(hits)}", flush=True)
+            else:
+                print(f"no hits at {dt.datetime.now(TZ):%H:%M:%S} - skipped "
+                      f"(lowest {rows[0]['name']} {rows[0]['rsi']:.1f})", flush=True)
         except Exception as e:  # noqa: BLE001
             print("cycle error:", repr(e), flush=True)
 
