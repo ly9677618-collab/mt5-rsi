@@ -302,23 +302,38 @@ def build_message(cfg, rows, now, new_hits=None):
     for r in signals:
         atr = r.get("atr")
         price = r["close"]
-        card = [f"🟢 {star}<b>{r['name']}</b> · RSI <b>{r['rsi']:.1f}</b>"]
+        nf = news_for(r["name"])
+        soon = None
+        if nf:
+            fut = [n for n in nf if n["time"] > now]
+            if fut:
+                soon = int((min(n["time"] for n in fut) - now).total_seconds() // 60)
+
+        if soon is not None and soon <= 30:
+            title = f"⏸ <b>{r['name']}</b> — خبر بعد {soon} دقيقة"
+            hint = "\n   ⚠️ <i>لا تدخل قبل الخبر — ناطره يمر</i>"
+        else:
+            title = f"🟢 {star}<b>ادخل شراء — {r['name']}</b>"
+            hint = ""
+
+        card = [title]
         if atr and price:
             sl = price - atr
             tp = price + atr * tp_mult
-            card.append(f"   السعر <code>{fmt_price(price)}</code>")
+            card.append(f"   دخول <code>{fmt_price(price)}</code>")
             card.append(f"   🛑 <code>{fmt_price(sl)}</code> · 🎯 <code>{fmt_price(tp)}</code>")
         else:
-            card.append(f"   السعر <code>{fmt_price(price)}</code>")
+            card.append(f"   دخول <code>{fmt_price(price)}</code>")
         r60, r240 = r.get("rsi60"), r.get("rsi240")
-        line = "   📊 1H"
+        line = f"   📊 RSI {r['rsi']:.1f} · 1H"
         line += f" {r60:.1f}" if r60 is not None else " -"
         line += f" · 4H {r240:.1f}" if r240 is not None else " · 4H -"
         card.append(line)
-        nf = news_for(r["name"])
         if nf:
             card.append("   🔴 " + " · ".join(
                 f"{n['cur']} {fmt12(n['time'])}" for n in nf[:2]))
+        if hint:
+            card.append(hint.strip("\n"))
         cards.append("\n".join(card))
 
     body = "\n\n".join(cards)
