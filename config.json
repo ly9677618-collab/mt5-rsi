@@ -3,6 +3,7 @@
   "timeframe": 15,
   "rsi_field": "RSI|15",
   "duration": 19800,
+  "send_when_empty": false,
   "symbols": {
     "BCHUSD": "BINANCE:BCHUSDT",
     "XAUUSD": "OANDA:XAUUSD",
