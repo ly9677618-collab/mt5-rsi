@@ -79,12 +79,14 @@ def get_json(url, tries=3):
 
 def quote(tv_symbol, field):
     url = (f"https://scanner.tradingview.com/symbol?symbol={urllib.parse.quote(tv_symbol)}"
-           f"&fields=close,change,{urllib.parse.quote(field)}")
+           f"&fields=close,change,{urllib.parse.quote(field)},RSI%7C60,RSI%7C240")
     d = get_json(url)
     return {
         "close": d.get("close"),
         "change": d.get("change"),
         "rsi": d.get(field),
+        "rsi60": d.get("RSI|60"),
+        "rsi240": d.get("RSI|240"),
     }
 
 
@@ -228,18 +230,33 @@ def build_message(cfg, rows, now):
                 f"• <code>{r['name']}</code> — RSI {r['rsi']:.1f}" for r in near)
         return head + body + news_block(news, news_ok) + "\n\n<i>TradingView · RSI-14</i>"
 
-    header = f"{'#':>3}  {'PAIR':<8} {'RSI':>6} {'PRICE':>11} {'CHG':>7}  N"
+    header = f"{'#':>3}  {'PAIR':<8} {'M15':>5} {'1H':>5} {'4H':>5} {'PRICE':>10} N"
     lines = [header, "─" * len(header)]
     for i, r in enumerate(hits, 1):
-        chg = r["change"] if r["change"] is not None else 0.0
         flag = "*" if has_news(r["name"]) else " "
+        r60 = r.get("rsi60")
+        r240 = r.get("rsi240")
         lines.append(
-            f"{i:>3}  {r['name']:<8} {r['rsi']:>6.1f} {fmt_price(r['close']):>11} {chg:>6.2f}%  {flag}"
+            f"{i:>3}  {r['name']:<8} {r['rsi']:>5.1f} "
+            f"{(f'{r60:.1f}' if r60 is not None else '-'):>5} "
+            f"{(f'{r240:.1f}' if r240 is not None else '-'):>5} "
+            f"{fmt_price(r['close']):>10} {flag}"
         )
 
+    deep = [r for r in hits
+            if (r.get("rsi60") or 100) <= 35 and (r.get("rsi240") or 100) <= 35]
+    bounce = [r for r in hits
+              if (r.get("rsi60") or 0) >= 45 and (r.get("rsi240") or 0) >= 45]
+
     foot = ""
+    if bounce:
+        foot += "\n🔼 <b>ارتداد محتمل</b> (M15 واطي بس 1H/4H فوق 45): " + \
+                " · ".join(r["name"] for r in bounce)
+    if deep:
+        foot += "\n🔻 <b>اتجاه هابط قوي</b> (كل الفريمات تحت 35 — لا تشتري ضد): " + \
+                " · ".join(r["name"] for r in deep)
     if near:
-        foot = "\n🔎 الأقرب: " + " · ".join(f"{r['name']} {r['rsi']:.1f}" for r in near)
+        foot += "\n🔎 الأقرب: " + " · ".join(f"{r['name']} {r['rsi']:.1f}" for r in near)
     return (head + "<pre>" + "\n".join(lines) + "</pre>" + foot
             + news_block(news, news_ok) + "\n\n<i>TradingView · RSI-14</i>")
 
