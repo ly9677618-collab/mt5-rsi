@@ -2,6 +2,8 @@
   "threshold": 35.0,
   "timeframe": 15,
   "rsi_field": "RSI|15",
+  "filter_1h": 45.0,
+  "tp_mult": 1.75,
   "duration": 19800,
   "send_when_empty": false,
   "symbols": {
