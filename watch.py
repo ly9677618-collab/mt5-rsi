@@ -129,6 +129,64 @@ def scan(cfg):
     return out
 
 
+FF_CAL_URL = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
+FIAT = {"EUR", "GBP", "USD", "JPY", "AUD", "NZD", "CAD", "CHF", "CNY"}
+_ff_cache = {"at": 0.0, "events": []}
+
+
+def fmt12(d):
+    h = d.hour % 12 or 12
+    suf = "ص" if d.hour < 12 else "م"
+    return f"{h}:{d.minute:02d} {suf}"
+
+
+def ff_events(max_age=7200):
+    now = time.time()
+    if now - _ff_cache["at"] < max_age and _ff_cache["events"]:
+        _ff_cache["ok"] = True
+        return _ff_cache["events"]
+    try:
+        data = get_json(FF_CAL_URL, tries=2)
+        if isinstance(data, list) and data:
+            _ff_cache["events"] = data
+            _ff_cache["at"] = now
+            _ff_cache["ok"] = True
+        return _ff_cache["events"]
+    except Exception as e:  # noqa: BLE001
+        print("calendar fetch failed:", repr(e), flush=True)
+        _ff_cache["ok"] = bool(_ff_cache["events"])
+        return _ff_cache["events"]
+
+
+def pair_currencies(name):
+    base, quote = name[:3].upper(), name[3:6].upper()
+    out = []
+    if base in FIAT:
+        out.append(base)
+    if quote in FIAT:
+        out.append(quote)
+    return out or ["USD"]
+
+
+def red_events_today(now):
+    today = now.date()
+    out = []
+    evs = ff_events()
+    for e in evs:
+        if str(e.get("impact", "")).lower() != "high":
+            continue
+        try:
+            d = dt.datetime.fromisoformat(e["date"]).astimezone(TZ)
+        except Exception:  # noqa: BLE001
+            continue
+        if d.date() != today:
+            continue
+        out.append({"cur": str(e.get("country", "")).upper(), "time": d,
+                    "title": e.get("title", "")})
+    out.sort(key=lambda x: x["time"])
+    return out, bool(evs)
+
+
 def build_message(cfg, rows, now):
     thr = float(cfg["threshold"])
     tf = int(cfg["timeframe"])
@@ -138,9 +196,17 @@ def build_message(cfg, rows, now):
     candle_close = now.replace(minute=(now.minute // tf) * tf, second=0, microsecond=0)
     candle_open = candle_close - dt.timedelta(minutes=tf)
 
+    news, news_ok = red_events_today(now)
+    news_cur = {}
+    for n in news:
+        news_cur.setdefault(n["cur"], []).append(n)
+
+    def has_news(pair):
+        return any(c in news_cur for c in pair_currencies(pair))
+
     head = (
         f"📉 <b>RSI ≤ {thr:g}</b> — فريم {tf} دقيقة\n"
-        f"🕐 <b>{now:%H:%M}</b> بغداد · شمعة <code>{candle_open:%H:%M}–{candle_close:%H:%M}</code>\n"
+        f"🕐 <b>{fmt12(now)}</b> بغداد · شمعة <code>{fmt12(candle_open)}–{fmt12(candle_close)}</code>\n"
         f"📊 وصلوا الحد: <b>{len(hits)}</b> من {len(rows)}\n\n"
     )
 
@@ -149,20 +215,36 @@ def build_message(cfg, rows, now):
         if near:
             body += "\n🔎 الأقرب:\n" + "\n".join(
                 f"• <code>{r['name']}</code> — RSI {r['rsi']:.1f}" for r in near)
-        return head + body + "\n\n<i>TradingView · RSI-14</i>"
+        return head + body + news_block(news, news_ok) + "\n\n<i>TradingView · RSI-14</i>"
 
-    header = f"{'#':>3}  {'PAIR':<8} {'RSI':>6} {'PRICE':>11} {'CHG':>7}"
+    header = f"{'#':>3}  {'PAIR':<8} {'RSI':>6} {'PRICE':>11} {'CHG':>7}  N"
     lines = [header, "─" * len(header)]
     for i, r in enumerate(hits, 1):
         chg = r["change"] if r["change"] is not None else 0.0
+        flag = "*" if has_news(r["name"]) else " "
         lines.append(
-            f"{i:>3}  {r['name']:<8} {r['rsi']:>6.1f} {fmt_price(r['close']):>11} {chg:>6.2f}%"
+            f"{i:>3}  {r['name']:<8} {r['rsi']:>6.1f} {fmt_price(r['close']):>11} {chg:>6.2f}%  {flag}"
         )
 
     foot = ""
     if near:
         foot = "\n🔎 الأقرب: " + " · ".join(f"{r['name']} {r['rsi']:.1f}" for r in near)
-    return head + "<pre>" + "\n".join(lines) + "</pre>" + foot + "\n\n<i>TradingView · RSI-14</i>"
+    return (head + "<pre>" + "\n".join(lines) + "</pre>" + foot
+            + news_block(news, news_ok) + "\n\n<i>TradingView · RSI-14</i>")
+
+
+def news_block(news, ok=True):
+    if not ok:
+        return "\n\n⚠️ <i>ما قدرت أجيب تقويم الأخبار هذي اللحظة</i>"
+    if not news:
+        return "\n\n✅ <b>ماكو أخبار حمراء اليوم</b>"
+    lines = ["", "", f"🔴 <b>أخبار حمراء اليوم ({len(news)}):</b>"]
+    for n in news[:8]:
+        lines.append(f"• <b>{fmt12(n['time'])}</b> — {n['cur']} — {html.escape(n['title'])}")
+    if len(news) > 8:
+        lines.append(f"• … و{len(news) - 8} غيرها")
+    lines.append("<i>* = العملة عندها خبر أحمر اليوم</i>")
+    return "\n".join(lines)
 
 
 # ------------------------------------------------------------------ handoff
@@ -278,3 +360,4 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
+
