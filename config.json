@@ -12,13 +12,10 @@
     "BCHUSD": "BINANCE:BCHUSDT",
     "XAUUSD": "OANDA:XAUUSD",
     "EURUSD": "FX:EURUSD",
-    "EURGBP": "FX:EURGBP",
     "CADJPY": "FX:CADJPY",
     "AUDJPY": "FX:AUDJPY",
     "GBPUSD": "FX:GBPUSD",
     "AUDUSD": "FX:AUDUSD",
-    "NZDUSD": "FX:NZDUSD",
-    "USDCHF": "FX:USDCHF",
-    "USDCAD": "FX:USDCAD"
+    "NZDUSD": "FX:NZDUSD"
   }
 }
