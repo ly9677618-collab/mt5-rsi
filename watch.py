@@ -298,10 +298,11 @@ def build_message(cfg, rows, now, new_hits=None):
         return head + body + news_block(news, news_ok) + "\n\n<i>TradingView</i>"
 
     cards = []
+    star = "⭐ " if 0 <= now.astimezone(dt.timezone.utc).hour < 7 else ""
     for r in signals:
         atr = r.get("atr")
         price = r["close"]
-        card = [f"🟢 <b>{r['name']}</b> · RSI <b>{r['rsi']:.1f}</b>"]
+        card = [f"🟢 {star}<b>{r['name']}</b> · RSI <b>{r['rsi']:.1f}</b>"]
         if atr and price:
             sl = price - atr
             tp = price + atr * tp_mult
