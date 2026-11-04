@@ -129,9 +129,13 @@ def scan(cfg):
     return out
 
 
-FF_CAL_URL = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
+TV_CAL_URL = "https://economic-calendar.tradingview.com/events"
 FIAT = {"EUR", "GBP", "USD", "JPY", "AUD", "NZD", "CAD", "CHF", "CNY"}
-_ff_cache = {"at": 0.0, "events": []}
+# currency -> tradingview country code
+TV_COUNTRY = {"EUR": "EU", "USD": "US", "GBP": "GB", "JPY": "JP",
+              "AUD": "AU", "NZD": "NZ", "CAD": "CA", "CHF": "CH", "CNY": "CN"}
+TV_CODES = "US,EU,GB,JP,AU,NZ,CA,CH"
+_cal_cache = {"at": 0.0, "events": [], "ok": False}
 
 
 def fmt12(d):
@@ -140,22 +144,28 @@ def fmt12(d):
     return f"{h}:{d.minute:02d} {suf}"
 
 
-def ff_events(max_age=7200):
+def tv_events(max_age=3600):
     now = time.time()
-    if now - _ff_cache["at"] < max_age and _ff_cache["events"]:
-        _ff_cache["ok"] = True
-        return _ff_cache["events"]
+    if now - _cal_cache["at"] < max_age and _cal_cache["events"]:
+        _cal_cache["ok"] = True
+        return _cal_cache["events"]
+    day0 = dt.datetime.now(TZ).replace(hour=0, minute=0, second=0, microsecond=0)
+    frm = day0.astimezone(dt.timezone.utc)
+    to = frm + dt.timedelta(days=1)
+    url = (f"{TV_CAL_URL}?from={frm:%Y-%m-%dT%H:%M:%S}.000Z"
+           f"&to={to:%Y-%m-%dT%H:%M:%S}.000Z&countries={TV_CODES}")
     try:
-        data = get_json(FF_CAL_URL, tries=2)
-        if isinstance(data, list) and data:
-            _ff_cache["events"] = data
-            _ff_cache["at"] = now
-            _ff_cache["ok"] = True
-        return _ff_cache["events"]
+        req = urllib.request.Request(url, headers=UA)
+        with urllib.request.urlopen(req, timeout=20) as r:
+            data = json.loads(r.read().decode())
+        evs = data.get("result", [])
+        if evs:
+            _cal_cache.update({"events": evs, "at": now, "ok": True})
+        return _cal_cache["events"]
     except Exception as e:  # noqa: BLE001
         print("calendar fetch failed:", repr(e), flush=True)
-        _ff_cache["ok"] = bool(_ff_cache["events"])
-        return _ff_cache["events"]
+        _cal_cache["ok"] = bool(_cal_cache["events"])
+        return _cal_cache["events"]
 
 
 def pair_currencies(name):
@@ -171,18 +181,19 @@ def pair_currencies(name):
 def red_events_today(now):
     today = now.date()
     out = []
-    evs = ff_events()
+    evs = tv_events()
     for e in evs:
-        if str(e.get("impact", "")).lower() != "high":
+        if e.get("importance") != 1:      # TradingView: 1 = high impact
             continue
         try:
-            d = dt.datetime.fromisoformat(e["date"]).astimezone(TZ)
+            d = dt.datetime.fromisoformat(str(e["date"]).replace("Z", "+00:00")).astimezone(TZ)
         except Exception:  # noqa: BLE001
             continue
         if d.date() != today:
             continue
-        out.append({"cur": str(e.get("country", "")).upper(), "time": d,
-                    "title": e.get("title", "")})
+        country = str(e.get("country", "")).upper()
+        cur = next((c for c, code in TV_COUNTRY.items() if code == country), country)
+        out.append({"cur": cur, "time": d, "title": e.get("title", "")})
     out.sort(key=lambda x: x["time"])
     return out, bool(evs)
 
