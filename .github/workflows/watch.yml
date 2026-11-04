@@ -23,6 +23,14 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Restore state
+        uses: actions/cache@v4
+        with:
+          path: state.json
+          key: state-${{ github.run_id }}
+          restore-keys: |
+            state-
+
       - name: Watch (15m RSI)
         env:
           GH_TOKEN: ${{ github.token }}
