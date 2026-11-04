@@ -1,0 +1,19 @@
+{
+  "threshold": 35.0,
+  "timeframe": 15,
+  "rsi_field": "RSI|15",
+  "duration": 19800,
+  "symbols": {
+    "BCHUSD": "BINANCE:BCHUSDT",
+    "XAUUSD": "OANDA:XAUUSD",
+    "EURUSD": "FX:EURUSD",
+    "EURGBP": "FX:EURGBP",
+    "CADJPY": "FX:CADJPY",
+    "AUDJPY": "FX:AUDJPY",
+    "GBPUSD": "FX:GBPUSD",
+    "AUDUSD": "FX:AUDUSD",
+    "NZDUSD": "FX:NZDUSD",
+    "USDCHF": "FX:USDCHF",
+    "USDCAD": "FX:USDCAD"
+  }
+}
