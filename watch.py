@@ -94,17 +94,17 @@ def get_json(url, tries=3):
     raise last
 
 
-def quote(tv_symbol, field):
+def quote(tv_symbol, field, filter_field, atr_field):
     url = (f"https://scanner.tradingview.com/symbol?symbol={urllib.parse.quote(tv_symbol)}"
-           f"&fields=close,change,{urllib.parse.quote(field)},RSI%7C60,RSI%7C240,ATR%7C15")
+           f"&fields=close,change,{urllib.parse.quote(field)},"
+           f"{urllib.parse.quote(filter_field)},{urllib.parse.quote(atr_field)}")
     d = get_json(url)
     return {
         "close": d.get("close"),
         "change": d.get("change"),
         "rsi": d.get(field),
-        "rsi60": d.get("RSI|60"),
-        "rsi240": d.get("RSI|240"),
-        "atr": d.get("ATR|15"),
+        "filt": d.get(filter_field),
+        "atr": d.get(atr_field),
     }
 
 
@@ -135,10 +135,12 @@ def send(cfg, text):
 
 def scan(cfg):
     field = cfg["rsi_field"]
+    ff = cfg.get("filter_field", "RSI|240")
+    af = cfg.get("atr_field", "ATR|60")
     out = []
     for mt5_name, tv in cfg["symbols"].items():
         try:
-            q = quote(tv, field)
+            q = quote(tv, field, ff, af)
             if q["rsi"] is None:
                 continue
             out.append({"name": mt5_name, "tv": tv, **q})
@@ -277,13 +279,14 @@ def build_message(cfg, rows, now, new_hits=None):
     else:
         us_txt = f"💵 الدولار: <b>ثابت ➖</b> ({us:+.2f}%)\n"
 
-    f1 = float(cfg.get("filter_1h", 45))
+    f1 = float(cfg.get("filter_min", 45))
     tp_mult = float(cfg.get("tp_mult", 1.75))
-    signals = [r for r in new_hits if (r.get("rsi60") or 0) >= f1]
-    rejected = [r for r in new_hits if (r.get("rsi60") or 0) < f1]
+    signals = [r for r in new_hits if (r.get("filt") or 0) >= f1]
+    rejected = [r for r in new_hits if (r.get("filt") or 0) < f1]
 
+    tf_label = "الساعة" if tf >= 60 else f"{tf} دقيقة"
     head = (
-        f"🔔 <b>إشارة RSI — فريم {tf} دقيقة</b>\n"
+        f"🔔 <b>إشارة RSI — فريم {tf_label}</b>\n"
         f"🕐 <b>{fmt12(now)}</b> · شمعة <code>{fmt12(candle_open)}–{fmt12(candle_close)}</code>\n"
         f"{us_txt}\n"
     )
@@ -291,9 +294,9 @@ def build_message(cfg, rows, now, new_hits=None):
     if not signals:
         body = "🚫 <b>ماكو إشارة مؤكدة هذي الشمعة</b>\n"
         if rejected:
-            body += "\n<i>رفضها فلتر الاتجاه (1H أقل من " + f"{f1:g}" + "):</i>\n"
+            body += "\n<i>رفضها فلتر الاتجاه (4H أقل من " + f"{f1:g}" + "):</i>\n"
             body += "\n".join(
-                f"• {r['name']} — M15 {r['rsi']:.1f} · 1H {(r.get('rsi60') or 0):.1f}"
+                f"• {r['name']} — RSI {r['rsi']:.1f} · فلتر {(r.get('filt') or 0):.1f}"
                 for r in rejected)
         return head + body + news_block(news, news_ok) + "\n\n<i>TradingView</i>"
 
@@ -324,10 +327,9 @@ def build_message(cfg, rows, now, new_hits=None):
             card.append(f"   🛑 <code>{fmt_price(sl)}</code> · 🎯 <code>{fmt_price(tp)}</code>")
         else:
             card.append(f"   دخول <code>{fmt_price(price)}</code>")
-        r60, r240 = r.get("rsi60"), r.get("rsi240")
-        line = f"   📊 RSI {r['rsi']:.1f} · 1H"
-        line += f" {r60:.1f}" if r60 is not None else " -"
-        line += f" · 4H {r240:.1f}" if r240 is not None else " · 4H -"
+        filt = r.get("filt")
+        line = f"   📊 RSI {r['rsi']:.1f} · فلتر 4H"
+        line += f" {filt:.1f}" if filt is not None else " -"
         card.append(line)
         if nf:
             card.append("   🔴 " + " · ".join(
@@ -341,7 +343,7 @@ def build_message(cfg, rows, now, new_hits=None):
     foot = ""
     if rejected:
         foot = "\n\n🚫 <i>رفضها الفلتر: " + " · ".join(
-            f"{r['name']} (1H {(r.get('rsi60') or 0):.1f})" for r in rejected) + "</i>"
+            f"{r['name']} ({r.get('filt') or 0:.1f})" for r in rejected) + "</i>"
 
     return (head + body + foot + news_block(news, news_ok)
             + "\n\n<i>وقف 1×ATR · هدف " + f"{tp_mult:g}" + "×ATR</i>")
@@ -455,7 +457,7 @@ def main():
         try:
             rows = scan(cfg)
             thr = float(cfg["threshold"])
-            f1 = float(cfg.get("filter_1h", 45))
+            f1 = float(cfg.get("filter_min", 45))
 
             st = load_state()
             now_s = dt.datetime.now(TZ).isoformat(timespec="seconds")
@@ -468,7 +470,7 @@ def main():
                     st[key] = {"below": False, "alerted": False, "rsi": round(r["rsi"], 1)}
                     continue
                 already = cur.get("alerted", False)
-                if (r.get("rsi60") or 0) >= f1 and not already:
+                if (r.get("filt") or 0) >= f1 and not already:
                     cands.append(r)
                     st[key] = {"below": True, "alerted": True, "rsi": round(r["rsi"], 1),
                                "at": now_s}
@@ -494,4 +496,5 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
+
 
